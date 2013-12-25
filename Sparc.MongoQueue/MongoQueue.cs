@@ -13,8 +13,6 @@
 
         public string CollectionName { get; set; }
 
-        public TimeSpan MaxProcessingTime { get; set; }
-
         public MongoQueue(MongoDatabase db, string queueName)
         {
             if (string.IsNullOrWhiteSpace(queueName))
@@ -29,7 +27,6 @@
 
             this.db = db;
             this.QueueName = queueName;
-            this.MaxProcessingTime = TimeSpan.FromMinutes(30.0);
             this.CollectionName = "MongoQueue";
         }
 
@@ -41,33 +38,27 @@
             }
 
             schedule = schedule ?? new Schedule { Repeat = Repeat.None, NextRun = DateTime.UtcNow };
-
+            var item = new BsonDocument();
             var meta = new BsonDocument();
             meta["QueueName"] = this.QueueName;
-            meta["Schedule"] = schedule.ToBsonDocument();
-            data["MongoQueue"] = meta;
-            this.db.GetCollection(this.CollectionName).Save(data);
+            item["MongoQueue"] = meta;
+            item["data"] = data;
+            this.db.GetCollection(this.CollectionName).Save(item);
         }
 
-        public MongoQueueItem Pop()
+        public BsonDocument Pop()
         {
             var collection = this.db.GetCollection(this.CollectionName);
-            var query = Query.And(
-                Query.EQ("MongoQueue.QueueName", this.QueueName),
-                Query.Or(
-                    Query.NotExists("MongoQueue.Schedule"),
-                    Query.LTE("MongoQueue.Schedule.NextRun", DateTime.UtcNow)));
-            var result = collection.FindAndModify(
-                query, 
-                SortBy.Null, 
-                Update.Set("MongoQueue.Machine", Environment.MachineName).Set("MongoQueue.Schedule.NextRun", DateTime.UtcNow.Add(this.MaxProcessingTime)))
-                .GetModifiedDocumentAs<MongoQueueItem>();
-            
+            var query = Query.EQ("MongoQueue.QueueName", this.QueueName);
+            var resultd = collection.FindAndRemove(
+                query,
+                SortBy.Null);
+
+            var result = resultd.ModifiedDocument;
             if (result != null)
             {
-                result.Collection = collection;
+                result = result["data"].AsBsonDocument;
             }
-
             return result;
         }
     }
